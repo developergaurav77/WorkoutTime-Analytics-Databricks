@@ -4,6 +4,8 @@ dist/
 __pycache__/
 *.egg-info
 .venv/
+.env
+dataset
 scratch/**
 !scratch/README.md
 **/explorations/**
