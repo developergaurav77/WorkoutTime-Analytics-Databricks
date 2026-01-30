@@ -4,13 +4,7 @@ from WorkoutTime_Analytics_Databricks import taxis
 
 
 def main():
-    # Process command-line arguments
-    parser = argparse.ArgumentParser(
-        description="Databricks job with catalog and schema parameters",
-    )
-    parser.add_argument("--catalog", required=True)
-    parser.add_argument("--schema", required=True)
-    args = parser.parse_args()
+
 
     # Set the default catalog and schema
     spark.sql(f"USE CATALOG {args.catalog}")
