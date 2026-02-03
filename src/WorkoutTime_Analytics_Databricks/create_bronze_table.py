@@ -44,6 +44,8 @@ def load_date(spark, configs_dict, schema) -> DataFrame:
         .option("cloudFiles.maxFilesPerTrigger", 1)
         .schema(schema)
         .load(configs_dict["source_path"])
+        .withColumn("ingestion_timestamp", F.current_timestamp())
+
     )
 
 
