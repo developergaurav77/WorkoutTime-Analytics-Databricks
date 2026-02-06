@@ -1,0 +1,141 @@
+# A sample job for WorkoutTime_Analytics_Databricks.
+
+resources:
+  jobs:
+    Workout_Analytics:
+      name: Workout_Analytics
+
+      trigger:
+        # Run this job every day, exactly one day from the last run; see https://docs.databricks.com/api/workspace/jobs/create#trigger
+        periodic:
+          interval: 1
+          unit: DAYS
+
+
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+        - name: ingestion_db
+          default: control
+        - name: ingestion_table
+          default: ingest_table_registry
+        - name: schema_registry_table
+          default: schema_registry
+        - name: bronze_db
+          default: bronze_workout
+        - name: history_table
+          default: ingest_run_history
+
+      tasks:
+        - task_key: Setup_Ingestion
+          spark_python_task:
+            python_file: ../src/WorkoutTime_Analytics_Databricks/setup_ingestion_master.py
+
+            parameters:
+            - "--catalog"
+            - "{{job.parameters.catalog}}"
+            - "--ingestion_db"
+            - "{{job.parameters.ingestion_db}}"
+            - "--ingestion_table"
+            - "{{job.parameters.ingestion_table}}"
+            - "--schema_registry_table"
+            - "{{job.parameters.schema_registry_table}}"
+            - "--history_table"
+            - "{{job.parameters.history_table}}"
+
+          environment_key: default
+
+        - task_key: Ingestion_Master
+          spark_python_task:
+            python_file: ../src/WorkoutTime_Analytics_Databricks/master.py
+
+            parameters:
+            - "--catalog"
+            - "{{job.parameters.catalog}}"
+            - "--ingestion_db"
+            - "{{job.parameters.ingestion_db}}"
+            - "--ingestion_table"
+            - "{{job.parameters.ingestion_table}}"
+            - "--schema_registry_table"
+            - "{{job.parameters.schema_registry_table}}"
+            - "--history_table"
+            - "{{job.parameters.history_table}}"
+
+          depends_on:
+            - task_key: Setup_Ingestion
+            
+          environment_key: default
+
+        - task_key: Schema_Registry
+          spark_python_task:
+            python_file: ../src/WorkoutTime_Analytics_Databricks/schema_registry_table.py
+
+            parameters:
+            - "--catalog"
+            - "{{job.parameters.catalog}}"
+            - "--ingestion_db"
+            - "{{job.parameters.ingestion_db}}"
+            - "--ingestion_table"
+            - "{{job.parameters.ingestion_table}}"
+            - "--schema_registry_table"
+            - "{{job.parameters.schema_registry_table}}"
+            - "--history_table"
+            - "{{job.parameters.history_table}}"
+
+          depends_on:
+            - task_key: Ingestion_Master
+            
+          environment_key: default
+
+        - task_key: Ingest_for_each_table
+          depends_on:
+            - task_key: Schema_Registry
+          for_each_task:
+            inputs: "{{tasks.Ingestion_Master.values.table_ids}}"
+            task:
+              task_key: Ingest_single_table
+              spark_python_task:
+                python_file: ../src/WorkoutTime_Analytics_Databricks/test.py
+                parameters:
+                  - --table_id
+                  - "{{input}}"
+              environment_key: default
+
+        - task_key: notebook_task
+          notebook_task:
+            notebook_path: ../src/sample_notebook.ipynb
+          depends_on:
+            - task_key: Schema_Registry
+        - task_key: python_wheel_task
+          depends_on:
+            - task_key: notebook_task
+          python_wheel_task:
+            package_name: WorkoutTime_Analytics_Databricks
+            entry_point: main
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+              - "--schema"
+              - "${var.schema}"
+          environment_key: default
+        - task_key: refresh_pipeline
+          depends_on:
+            - task_key: notebook_task
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.WorkoutTime_Analytics_Databricks_etl.id}
+
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "4"
+            dependencies:
+              # By default we just include the .whl file generated for the WorkoutTime_Analytics_Databricks package.
+              # See https://docs.databricks.com/dev-tools/bundles/library-dependencies.html
+              # for more information on how to add other libraries.
+              - ../dist/*.whl
+
+
+
+

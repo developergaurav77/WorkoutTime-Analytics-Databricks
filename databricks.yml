@@ -32,7 +32,7 @@ targets:
       host: https://dbc-790b2cf6-7aff.cloud.databricks.com
     variables:
       catalog: dev
-      schema: ${workspace.current_user.short_name}
+      schema: bronze_workout
   prod:
     mode: production
     workspace:
