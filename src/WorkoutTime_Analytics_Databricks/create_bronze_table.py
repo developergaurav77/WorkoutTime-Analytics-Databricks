@@ -42,6 +42,7 @@ def load_date(spark, configs_dict, schema) -> DataFrame:
         .option("cloudFiles.schemaLocation", configs_dict["checkpoint_path"] + "schema/" + configs_dict["target_table"])
         .option("cloudFiles.schemaEvolutionMode", "rescue")
         .option("cloudFiles.maxFilesPerTrigger", 1)
+        .option("header",configs_dict["header"])
         .schema(schema)
         .load(configs_dict["source_path"])
         .withColumn("ingestion_timestamp", F.current_timestamp())

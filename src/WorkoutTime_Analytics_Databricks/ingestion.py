@@ -4,27 +4,17 @@
 3. create_bronze_table.py - Creates bronze tables based on ingestion configurations and schema regisrty configuration.
 """
 import argparse
+from pyspark.sql import SparkSession, DataFrame
+
 
 from ingestion_history import now_ts, start_run,finish_run_success,finish_run_failure
-
-catalog = "dev"
-
-ingestion_db = "control"
-ingestion_table = "ingest_table_registry"
-bronze_db = "bronze_workout"
-schema_registry_table = "schema_registry"
-history_table = "ingest_run_history"
-
-# table_id = 1
-# table_id = dbutils.widgets.get("table_id")
-
-
 from spark import get_spark
-
-
 from create_bronze_table import get_defined_schema, load_date, merge_to_delta
+from common.logger import setup_logger
 
-from pyspark.sql import SparkSession, DataFrame
+
+logger = setup_logger()
+
 
 
 def start_stream(df: DataFrame, configs_dict: dict, spark: SparkSession):
@@ -45,19 +35,33 @@ def start_stream_test(df: DataFrame, configs_dict: dict, spark: SparkSession):
         f"{configs_dict['target_catalog']}.{configs_dict['target_schema']}.{configs_dict['target_table']}"
     )
 
-    print(f"Triggering for table {configs_dict['target_table']}")
+    logger.info(f"Triggering for table {configs_dict['target_table']}")
 
     writer = (
         df.writeStream.format("delta")
         .option("mergeSchema", "true")
         .option("checkpointLocation", configs_dict["checkpoint_path"] + configs_dict["target_table"])
         .queryName(configs_dict["target_table"])
-        .outputMode(configs_dict["write_mode"])  # <-- THIS replaces .mode()
+        .outputMode(configs_dict["write_mode"])  
     )
 
     if configs_dict["trigger_mode"] == "availableNow":
-        print(f"Triggering availableNow for table {configs_dict['target_table']}")
-        return writer.trigger(availableNow=True).toTable(target_full_name)
+        logger.info(f"Triggering availableNow for table {configs_dict['target_table']}")
+        query = writer.trigger(availableNow=True).toTable(target_full_name)
+
+        query.awaitTermination()
+
+        progress = query.lastProgress
+        rows = int(progress["sources"][0]["numInputRows"])
+
+        if rows == 0:
+            logger.warning(f"No new files found for {configs_dict['target_table']}")
+        else:
+            logger.info(f"{rows} rows processed for {configs_dict['target_table']}")
+
+        return query
+    
+
     else:
         return writer.trigger(processingTime=configs_dict["processing_time"]).toTable(target_full_name)
 
@@ -83,11 +87,13 @@ def main():
     args = parser.parse_args()
 
     table_id = int(args.table_id)
-    print(f"Running for table_id: {table_id}, type: {type(table_id)}")
+
+
+    logger.info(f"Running for table_id: {table_id}, type: {type(table_id)}")
 
 
     spark = get_spark(profile="dev-free-edition")
-    print("Spark session initialized:", spark)
+    logger.info(f"Spark session initialized: {spark}")
 
     configs_dict = dbutils.jobs.taskValues.get(
     taskKey="Ingestion_Master",
@@ -96,27 +102,25 @@ def main():
     ) 
     configs_dict = [d for d in configs_dict if d["table_id"] == table_id][0]
 
-
-
     start_ts, run_id  = start_run(table_id=table_id,configs_dict=configs_dict, spark=spark)
 
     try:
 
         schema = get_defined_schema(table_id=table_id, spark=spark)
-        print(f"Schema retrieved for table_id: {table_id} \n {schema}")
+        logger.info(f"Schema retrieved for table_id: {table_id} \n {schema}")
 
         raw_data = load_date(spark=spark, configs_dict=configs_dict, schema=schema)
-        print("Raw data loaded as streaming DataFrame.")
+        logger.info("Raw data loaded as streaming DataFrame.")
         # view_streaming_df(df=raw_data)
 
         # start_stream(df=raw_data, configs_dict=configs_dict,spark=spark)
         start_stream_test(df=raw_data, configs_dict=configs_dict, spark=spark)
 
         finish_run_success(run_id=run_id,start_ts=start_ts, table_id=table_id,configs_dict=configs_dict, spark=spark)
-        print("Ingestion process stopped.")
+        logger.info("Ingestion process stopped.")
 
     except Exception as e:
-        print(f"Error during ingestion: {e}")
+        logger.info(f"Error during ingestion: {e}")
 
         finish_run_failure(run_id=run_id, start_ts=start_ts, table_id=table_id,configs_dict=configs_dict, err_msg=e,spark=spark)
         raise e
