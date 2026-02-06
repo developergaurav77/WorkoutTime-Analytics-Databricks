@@ -97,7 +97,7 @@ resources:
             task:
               task_key: Ingest_single_table
               spark_python_task:
-                python_file: ../src/WorkoutTime_Analytics_Databricks/test.py
+                python_file: ../src/WorkoutTime_Analytics_Databricks/ingestion.py
                 parameters:
                   - --table_id
                   - "{{input}}"

@@ -3,6 +3,8 @@
 2. schema_registry_table.py - Creates a schema registry entry based on the source data schema.
 3. create_bronze_table.py - Creates bronze tables based on ingestion configurations and schema regisrty configuration.
 """
+import argparse
+
 from ingestion_history import now_ts, start_run,finish_run_success,finish_run_failure
 
 catalog = "dev"
@@ -13,47 +15,11 @@ bronze_db = "bronze_workout"
 schema_registry_table = "schema_registry"
 history_table = "ingest_run_history"
 
-table_id = 1
+# table_id = 1
 # table_id = dbutils.widgets.get("table_id")
 
 
 from spark import get_spark
-
-
-def get_configs(table_id: int, spark):
-    query = f"""
-    SELECT *
-    FROM {catalog}.{ingestion_db}.{ingestion_table}
-    WHERE table_id = {table_id}
-    """
-    df = spark.sql(query)
-    if df.isEmpty():
-        raise ValueError(f"No configurations found for table_id {table_id}")
-
-    configs_dict = (
-        df.select(
-            "table_id",
-            "source_path",
-            "source_format",
-            "header",
-            "target_catalog",
-            "target_schema",
-            "table_version",
-            "target_table",
-            "write_mode",
-            "checkpoint_path",
-            "merge_key",
-            "partition_by",
-            "enabled",
-            "trigger_mode",
-            "processing_time",
-            "schema_evolution_mode",
-        )
-        .collect()[0]
-        .asDict()
-    )
-
-    return configs_dict
 
 
 from create_bronze_table import get_defined_schema, load_date, merge_to_delta
@@ -112,11 +78,25 @@ def view_streaming_df(df: DataFrame):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--table_id", required=True)
+    args = parser.parse_args()
+
+    table_id = int(args.table_id)
+    print(f"Running for table_id: {table_id}, type: {type(table_id)}")
+
+
     spark = get_spark(profile="dev-free-edition")
     print("Spark session initialized:", spark)
 
-    configs_dict = get_configs(table_id=table_id, spark=spark)
-    print("Ingestion configurations retrieved:", configs_dict)
+    configs_dict = dbutils.jobs.taskValues.get(
+    taskKey="Ingestion_Master",
+    key="configs",
+    debugValue=[]
+    ) 
+    configs_dict = [d for d in configs_dict if d["table_id"] == table_id][0]
+
+
 
     start_ts, run_id  = start_run(table_id=table_id,configs_dict=configs_dict, spark=spark)
 
